@@ -99,3 +99,15 @@ This project is licensed under the MIT License. (You may want to add a LICENSE f
     *   Checking the `pdfs/` directory more efficiently before attempting downloads (though it already skips existing files).
     *   Potentially finding a way to query an API or source that lists only *valid* match report URLs for a given competition/year, rather than iterating through all possibilities.
     *   Alternatively, tracking the last successfully downloaded ID per competition/year and starting the scan from there on subsequent runs.
+
+## Next Steps
+- Develop an interactive dashboard (e.g., using Dash, Streamlit, or Power BI) that reads the following cleaned output files:
+  - `csv/jogos_resumo_clean.csv`
+  - `csv/receitas_detalhe.csv`
+  - `csv/despesas_detalhe.csv`
+- Include visual metrics and filters such as:
+  - Total matches, revenues, and expenses by competition, team, or stadium
+  - Time-series plots of attendance and revenue over the season
+  - Breakdown of revenue sources and expense categories
+  - Comparison between home and away team performance
+- Provide deployment instructions for hosting the dashboard locally or in the cloud (Heroku/Azure/GCP).

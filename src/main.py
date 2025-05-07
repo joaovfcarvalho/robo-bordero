@@ -2,41 +2,78 @@ import os
 import logging
 import tkinter as tk
 import datetime # Added datetime import
-from tkinter import messagebox
+from tkinter import messagebox, ttk
+from pathlib import Path # Added pathlib
 from .scraper import download_pdfs
 from .gemini import analyze_pdf # Corrected import name
 from .db import append_to_csv, read_csv
 from .utils import setup_logging, load_env_variables as load_env_vars, ensure_directory_exists
+from .normalize import refresh_lookups, write_clean_csv
 
 # Centralized logging setup
 setup_logging()
+
+def run_normalization(jogos_resumo_csv_path: Path, lookup_dir: Path, clean_csv_path: Path, gemini_api_key: str):
+    """
+    Runs the lookup refresh and clean CSV writing process.
+    """
+    try:
+        logging.info("Starting normalization process...")
+        refresh_lookups(jogos_resumo_csv_path, lookup_dir, gemini_api_key)
+        write_clean_csv(jogos_resumo_csv_path, clean_csv_path, lookup_dir)
+        messagebox.showinfo("Sucesso", "Normalização de nomes concluída. Arquivo 'jogos_resumo_clean.csv' criado/atualizado.")
+        logging.info("Normalization process finished successfully.")
+    except Exception as e:
+        logging.error(f"An error occurred during normalization: {e}")
+        messagebox.showerror("Erro na Normalização", f"Ocorreu um erro: {e}")
 
 def run_operation(choice, year, competitions, pdf_dir, csv_dir, gemini_api_key):
     """
     Executes the selected operation based on the user's choice.
     """
-    # Caminhos dos arquivos CSV
-    jogos_resumo_csv = os.path.join(csv_dir, "jogos_resumo.csv")
-    receitas_detalhe_csv = os.path.join(csv_dir, "receitas_detalhe.csv")
-    despesas_detalhe_csv = os.path.join(csv_dir, "despesas_detalhe.csv")
+    # Define paths using pathlib
+    pdf_path = Path(pdf_dir)
+    csv_path = Path(csv_dir)
+    lookup_path = Path("lookups") # Define lookup directory path
+    jogos_resumo_csv = csv_path / "jogos_resumo.csv"
+    receitas_detalhe_csv = csv_path / "receitas_detalhe.csv"
+    despesas_detalhe_csv = csv_path / "despesas_detalhe.csv"
+    jogos_resumo_clean_csv = csv_path / "jogos_resumo_clean.csv" # Define clean CSV path
 
-    if choice == "1":
-        for competition in competitions:
-            download_pdfs(year, competition, pdf_dir)
-        messagebox.showinfo("Operação Concluída", "Download de novos borderôs concluído.")
+    try:
+        if choice == "1": # Download PDFs
+            logging.info("Iniciando download de PDFs...")
+            for competition in competitions:
+                download_pdfs(year, competition, pdf_path) # Pass Path object
+            messagebox.showinfo("Sucesso", "Download dos PDFs concluído.")
+            logging.info("Download de PDFs concluído.")
 
-    elif choice == "2":
-        process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key)
-        messagebox.showinfo("Operação Concluída", "Análise de borderôs concluída.")
+        elif choice == "2": # Process PDFs
+            logging.info("Iniciando processamento de PDFs...")
+            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key) # Pass Path objects
+            messagebox.showinfo("Sucesso", "Processamento dos PDFs concluído.")
+            logging.info("Processamento de PDFs concluído.")
 
-    elif choice == "3":
-        for competition in competitions:
-            download_pdfs(year, competition, pdf_dir)
-        process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key)
-        messagebox.showinfo("Operação Concluída", "Download e análise concluídos.")
+        elif choice == "3": # Download and Process
+            logging.info("Iniciando download e processamento de PDFs...")
+            for competition in competitions:
+                download_pdfs(year, competition, pdf_path) # Pass Path object
+            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key) # Pass Path objects
+            messagebox.showinfo("Sucesso", "Download e processamento dos PDFs concluídos.")
+            logging.info("Download e processamento de PDFs concluído.")
 
-    else:
-        messagebox.showerror("Erro", "Opção inválida.")
+        elif choice == "4": # Normalize CSV
+            logging.info("Iniciando normalização de nomes no CSV...")
+            run_normalization(jogos_resumo_csv, lookup_path, jogos_resumo_clean_csv, gemini_api_key) # Pass Path objects
+            # No need for messagebox here, run_normalization handles it
+
+        else:
+            messagebox.showwarning("Seleção Inválida", "Por favor, selecione uma operação válida.")
+            logging.warning("Seleção de operação inválida.")
+
+    except Exception as e:
+        logging.error(f"Erro durante a operação {choice}: {e}")
+        messagebox.showerror("Erro", f"Ocorreu um erro inesperado: {e}")
 
 def main():
     """
@@ -78,6 +115,10 @@ def main():
 
     tk.Button(root, text="3. Download e análise (execução completa)", 
               command=lambda: run_operation("3", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+
+    # --- Add Normalization Button ---
+    tk.Button(root, text="4. Normalizar Nomes (CSV)",
+              command=lambda: run_operation("4", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
     # --- End Button Command Updates ---
 
     root.mainloop()
