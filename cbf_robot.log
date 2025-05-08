@@ -1,3 +1,20 @@
 2025-05-08 10:20:11,852 - INFO - {'log_level': 20, 'log_file': 'cbf_robot.log', 'event': 'Logging initialized', 'logger': 'src.utils', 'level': 'info', 'timestamp': '2025-05-08T13:20:11.852428Z'}
 2025-05-08 10:20:11,883 - INFO - {'directory': 'cache', 'event': 'Cache directory initialized', 'logger': 'src.cache', 'level': 'info', 'timestamp': '2025-05-08T13:20:11.883456Z'}
 2025-05-08 10:20:12,113 - INFO - {'version': '1.0', 'event': 'Application started', 'logger': 'src.main', 'level': 'info', 'timestamp': '2025-05-08T13:20:12.113387Z'}
+2025-05-08 18:28:45 [info     ] Application started            [src.main] app=CBF Robot competitions=['142', '424', '242'] csv_dir=csv default_year=2025 pdf_dir=pdfs
+2025-05-08 18:28:45 [critical ] Error occurred                 [src.utils] app=CBF Robot error_message=Too early to create variable: no default root window error_type=RuntimeError traceback=Traceback (most recent call last):
+  File "C:\Users\joao.carvalho\OneDrive - CLUBE DE REGATAS DO FLAMENGO\Projects\robo-bordero\src\main.py", line 153, in main
+    competitions_var = tk.StringVar(value=",".join(settings["competitions"]))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 562, in __init__
+    Variable.__init__(self, master, value, name)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 393, in __init__
+    master = _get_default_root('create variable')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 319, in _get_default_root
+    raise RuntimeError(f"Too early to {what}: no default root window")
+RuntimeError: Too early to create variable: no default root window
+
+2025-05-08 18:35:13 [info     ] Application started            [src.main] app=CBF Robot competitions=['142', '424', '242'] csv_dir=csv default_year=2025 pdf_dir=pdfs
+2025-05-08 19:12:03 [info     ] Application started            [src.main] app=CBF Robot competitions=['142', '424', '242'] csv_dir=csv default_year=2025 pdf_dir=pdfs
+2025-05-08 19:13:08 [info     ] Application started            [src.main] app=CBF Robot competitions=['142', '424', '242'] csv_dir=csv default_year=2025 pdf_dir=pdfs

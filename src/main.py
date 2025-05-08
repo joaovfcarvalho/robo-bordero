@@ -3,7 +3,7 @@ import sys
 import logging
 import tkinter as tk
 import datetime
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 from pathlib import Path
 from .scraper import download_pdfs
 from .gemini import analyze_pdf
@@ -21,6 +21,7 @@ from .utils import (
 from .normalize import refresh_lookups, write_clean_csv
 import json
 from .validation import validate_summary, validate_revenue, validate_expense
+import threading
 
 # Set up structured logging
 logger = setup_logging()
@@ -117,6 +118,10 @@ def main():
     """
     load_env_vars()
 
+    # Initialize main window before creating control variables
+    root = tk.Tk()
+    root.title("CBF Robot")
+
     try:
         # Configurações - Get defaults, but year will be overridden by GUI
         default_year = int(os.getenv("YEAR", datetime.date.today().year))
@@ -136,11 +141,82 @@ def main():
                    pdf_dir=pdf_dir, 
                    csv_dir=csv_dir)
 
-        # Configuração da interface gráfica
+        # Load persistent GUI settings if available
+        config_file = Path("config.json")
+        if config_file.exists():
+            try:
+                stored = json.loads(config_file.read_text())
+                competitions = stored.get("competitions", competitions)
+                pdf_dir = stored.get("pdf_dir", pdf_dir)
+                csv_dir = stored.get("csv_dir", csv_dir)
+                gemini_api_key = stored.get("gemini_api_key", gemini_api_key)
+            except Exception:
+                pass
+        # Settings storage and GUI variables
+        settings = {"competitions": competitions, "pdf_dir": pdf_dir, "csv_dir": csv_dir, "gemini_api_key": gemini_api_key}
+        competitions_var = tk.StringVar(value=",".join(settings["competitions"]))
+        pdf_dir_var = tk.StringVar(value=settings["pdf_dir"])
+        csv_dir_var = tk.StringVar(value=settings["csv_dir"])
+        api_key_var = tk.StringVar(value=settings["gemini_api_key"])
+
+        def open_settings():
+            settings_win = tk.Toplevel(root)
+            settings_win.title("Configurações")
+            tk.Label(settings_win, text="Chave API Gemini:").grid(row=0, column=0, sticky='e')
+            tk.Entry(settings_win, textvariable=api_key_var, width=30).grid(row=0, column=1)
+            tk.Label(settings_win, text="Diretório PDFs:").grid(row=1, column=0, sticky='e')
+            tk.Entry(settings_win, textvariable=pdf_dir_var, width=30).grid(row=1, column=1)
+            tk.Button(settings_win, text="Browse...", command=lambda: pdf_dir_var.set(filedialog.askdirectory())).grid(row=1, column=2)
+            tk.Label(settings_win, text="Diretório CSVs:").grid(row=2, column=0, sticky='e')
+            tk.Entry(settings_win, textvariable=csv_dir_var, width=30).grid(row=2, column=1)
+            tk.Button(settings_win, text="Browse...", command=lambda: csv_dir_var.set(filedialog.askdirectory())).grid(row=2, column=2)
+            tk.Label(settings_win, text="Competições (IDs separados por vírgula):").grid(row=3, column=0, sticky='e')
+            tk.Entry(settings_win, textvariable=competitions_var, width=30).grid(row=3, column=1)
+            def save_settings():
+                settings["competitions"] = competitions_var.get().split(",")
+                settings["pdf_dir"] = pdf_dir_var.get()
+                settings["csv_dir"] = csv_dir_var.get()
+                settings["gemini_api_key"] = api_key_var.get()
+                # Persist settings
+                try:
+                    config_file.write_text(json.dumps(settings, indent=2))
+                except Exception:
+                    pass
+                messagebox.showinfo("Configurações", "Configurações salvas com sucesso.")
+                settings_win.destroy()
+            tk.Button(settings_win, text="Salvar", command=save_settings).grid(row=4, column=0, pady=10)
+            tk.Button(settings_win, text="Cancelar", command=settings_win.destroy).grid(row=4, column=1, pady=10)
+
+        # Operation execution with UI state management
+        operation_buttons = []
+        def threaded_operation(choice):
+            def task():
+                # Disable buttons and update UI in main thread
+                root.after(0, lambda: [btn.config(state='disabled') for btn in operation_buttons])
+                root.after(0, lambda: status_var.set(f"Operação {choice} iniciada..."))
+                root.after(0, progress.start)
+                try:
+                    run_operation(choice, int(year_var.get()), settings["competitions"], settings["pdf_dir"], settings["csv_dir"], settings["gemini_api_key"])
+                    root.after(0, lambda: status_var.set(f"Operação {choice} concluída com sucesso."))
+                except Exception:
+                    root.after(0, lambda: status_var.set(f"Erro na operação {choice}."))
+                finally:
+                    root.after(0, progress.stop)
+                    # Re-enable buttons in main thread
+                    root.after(0, lambda: [btn.config(state='normal') for btn in operation_buttons])
+            threading.Thread(target=task, daemon=True).start()
+
         root = tk.Tk()
         root.title("CBF Robot")
 
-        # --- Add Year Selection --- 
+        # Menu bar with Settings
+        menubar = tk.Menu(root)
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="Configurações", command=open_settings)
+        menubar.add_cascade(label="Configurações", menu=settings_menu)
+        root.config(menu=menubar)
+
+        # Year selection
         tk.Label(root, text="Ano para Download:").pack(pady=(10, 0))
         year_var = tk.StringVar(value=str(default_year))
         year_entry = tk.Entry(root, textvariable=year_var, width=10)
@@ -148,19 +224,25 @@ def main():
 
         tk.Label(root, text="Selecione a operação:").pack(pady=10)
 
-        # --- Update Button Commands to get year from entry --- 
-        tk.Button(root, text="1. Apenas download de novos borderôs", 
-                command=lambda: run_operation("1", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        # Status bar
+        status_var = tk.StringVar(value="Pronto")
+        status_label = tk.Label(root, textvariable=status_var, relief=tk.SUNKEN, anchor='w')
+        status_label.pack(side=tk.BOTTOM, fill='x')
 
-        tk.Button(root, text="2. Apenas análise de borderôs não processados", 
-                command=lambda: run_operation("2", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        # Progress bar
+        progress = ttk.Progressbar(root, mode='indeterminate')
+        progress.pack(side=tk.BOTTOM, fill='x')
 
-        tk.Button(root, text="3. Download e análise (execução completa)", 
-                command=lambda: run_operation("3", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
-
-        # --- Add Normalization Button ---
-        tk.Button(root, text="4. Normalizar Nomes (CSV)",
-                command=lambda: run_operation("4", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        # Operation buttons
+        btn1 = tk.Button(root, text="1. Apenas download de novos borderôs", command=lambda: threaded_operation("1"))
+        btn1.pack(pady=5)
+        btn2 = tk.Button(root, text="2. Apenas análise de borderôs não processados", command=lambda: threaded_operation("2"))
+        btn2.pack(pady=5)
+        btn3 = tk.Button(root, text="3. Download e análise (execução completa)", command=lambda: threaded_operation("3"))
+        btn3.pack(pady=5)
+        btn4 = tk.Button(root, text="4. Normalizar Nomes (CSV)", command=lambda: threaded_operation("4"))
+        btn4.pack(pady=5)
+        operation_buttons.extend([btn1, btn2, btn3, btn4])
 
         root.mainloop()
         
@@ -242,7 +324,7 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
                     with open(cache_file, 'w', encoding='utf-8') as cf:
                         json.dump(response, cf)
             except Exception as cache_err:
-                operation_logger.warning("Failed to write cache file", error=str(cache_err), id=id_jogo_cbf)
+                operation_logger.warning("Failed to write cache file", error=str(cache_err), id_jogo_cbf=id_jogo_cbf)
 
             # Check for error in response
             if response.get("error"):
