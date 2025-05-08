@@ -20,6 +20,7 @@ from .utils import (
 )
 from .normalize import refresh_lookups, write_clean_csv
 import json
+from .validation import validate_summary, validate_revenue, validate_expense
 
 # Set up structured logging
 logger = setup_logging()
@@ -305,7 +306,8 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
                 "receita_bruta_total", "despesa_total", "resultado_liquido",
                 "caminho_pdf_local", "data_processamento", "status", "log_erro"
             ]
-            append_to_csv(jogos_resumo_csv, [resumo_jogo], jogos_resumo_headers)
+            validated_summary = validate_summary([resumo_jogo])
+            append_to_csv(jogos_resumo_csv, validated_summary, jogos_resumo_headers)
 
             # Add match ID to detailed revenue/expense data
             for item in revenue_details:
@@ -316,11 +318,13 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
             # Append detailed data if present
             if revenue_details:
                 receita_headers = ["id_jogo_cbf"] + [k for k in revenue_details[0].keys() if k != "id_jogo_cbf"]
-                append_to_csv(receitas_detalhe_csv, revenue_details, receita_headers)
+                validated_revenue = validate_revenue(revenue_details)
+                append_to_csv(receitas_detalhe_csv, validated_revenue, receita_headers)
 
             if expense_details:
                 despesa_headers = ["id_jogo_cbf"] + [k for k in expense_details[0].keys() if k != "id_jogo_cbf"]
-                append_to_csv(despesas_detalhe_csv, expense_details, despesa_headers)
+                validated_expense = validate_expense(expense_details)
+                append_to_csv(despesas_detalhe_csv, validated_expense, despesa_headers)
 
             operation_logger.info("Successfully processed PDF", 
                                  id=id_jogo_cbf, 

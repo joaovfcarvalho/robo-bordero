@@ -4,3 +4,6 @@ python-dotenv==1.0.0
 google-genai==1.13.0
 pdfplumber==0.10.2
 structlog==23.2.0
+
+# Data validation schemas
+pydantic>=1.10
