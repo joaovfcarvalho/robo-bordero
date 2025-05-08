@@ -19,6 +19,7 @@ from .utils import (
     ConfigurationError,
 )
 from .normalize import refresh_lookups, write_clean_csv
+import json
 
 # Set up structured logging
 logger = setup_logging()
@@ -230,6 +231,17 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
 
             # Call the refactored analyze_pdf function
             response = analyze_pdf(pdf_content_bytes)
+            
+            # Cache successful responses locally for reuse
+            try:
+                if not response.get("error"):
+                    cache_dir = Path("cache")
+                    cache_dir.mkdir(exist_ok=True)
+                    cache_file = cache_dir / f"{id_jogo_cbf}.json"
+                    with open(cache_file, 'w', encoding='utf-8') as cf:
+                        json.dump(response, cf)
+            except Exception as cache_err:
+                operation_logger.warning("Failed to write cache file", error=str(cache_err), id=id_jogo_cbf)
 
             # Check for error in response
             if response.get("error"):
