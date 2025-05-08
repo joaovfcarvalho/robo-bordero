@@ -1,31 +1,44 @@
 import os
+import sys
 import logging
 import tkinter as tk
-import datetime # Added datetime import
+import datetime
 from tkinter import messagebox, ttk
-from pathlib import Path # Added pathlib
+from pathlib import Path
 from .scraper import download_pdfs
-from .gemini import analyze_pdf # Corrected import name
+from .gemini import analyze_pdf
 from .db import append_to_csv, read_csv
-from .utils import setup_logging, load_env_variables as load_env_vars, ensure_directory_exists
+from .utils import (
+    setup_logging, 
+    load_env_variables as load_env_vars, 
+    ensure_directory_exists,
+    get_logger,
+    handle_error,
+    CBFRobotError,
+    ProcessingError,
+    ConfigurationError,
+)
 from .normalize import refresh_lookups, write_clean_csv
 
-# Centralized logging setup
-setup_logging()
+# Set up structured logging
+logger = setup_logging()
 
 def run_normalization(jogos_resumo_csv_path: Path, lookup_dir: Path, clean_csv_path: Path, gemini_api_key: str):
     """
     Runs the lookup refresh and clean CSV writing process.
     """
     try:
-        logging.info("Starting normalization process...")
+        logger.info("Starting normalization process")
         refresh_lookups(jogos_resumo_csv_path, lookup_dir, gemini_api_key)
         write_clean_csv(jogos_resumo_csv_path, clean_csv_path, lookup_dir)
         messagebox.showinfo("Sucesso", "Normalização de nomes concluída. Arquivo 'jogos_resumo_clean.csv' criado/atualizado.")
-        logging.info("Normalization process finished successfully.")
+        logger.info("Normalization process finished successfully")
     except Exception as e:
-        logging.error(f"An error occurred during normalization: {e}")
-        messagebox.showerror("Erro na Normalização", f"Ocorreu um erro: {e}")
+        handle_error(
+            error=e,
+            log_context={"process": "normalization", "input_file": str(jogos_resumo_csv_path)},
+            ui_callback=messagebox.showerror
+        )
 
 def run_operation(choice, year, competitions, pdf_dir, csv_dir, gemini_api_key):
     """
@@ -34,46 +47,66 @@ def run_operation(choice, year, competitions, pdf_dir, csv_dir, gemini_api_key):
     # Define paths using pathlib
     pdf_path = Path(pdf_dir)
     csv_path = Path(csv_dir)
-    lookup_path = Path("lookups") # Define lookup directory path
+    lookup_path = Path("lookups") 
     jogos_resumo_csv = csv_path / "jogos_resumo.csv"
     receitas_detalhe_csv = csv_path / "receitas_detalhe.csv"
     despesas_detalhe_csv = csv_path / "despesas_detalhe.csv"
-    jogos_resumo_clean_csv = csv_path / "jogos_resumo_clean.csv" # Define clean CSV path
+    jogos_resumo_clean_csv = csv_path / "jogos_resumo_clean.csv" 
 
     try:
+        operation_context = {
+            "operation": choice,
+            "year": year,
+            "competitions": competitions,
+            "pdf_dir": str(pdf_path),
+            "csv_dir": str(csv_path)
+        }
+
         if choice == "1": # Download PDFs
-            logging.info("Iniciando download de PDFs...")
+            logger.info("Starting PDF download", **operation_context)
             for competition in competitions:
-                download_pdfs(year, competition, pdf_path) # Pass Path object
+                download_pdfs(year, competition, pdf_path)
             messagebox.showinfo("Sucesso", "Download dos PDFs concluído.")
-            logging.info("Download de PDFs concluído.")
+            logger.info("PDF download completed", **operation_context)
 
         elif choice == "2": # Process PDFs
-            logging.info("Iniciando processamento de PDFs...")
-            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key) # Pass Path objects
+            logger.info("Starting PDF processing", **operation_context)
+            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key)
             messagebox.showinfo("Sucesso", "Processamento dos PDFs concluído.")
-            logging.info("Processamento de PDFs concluído.")
+            logger.info("PDF processing completed", **operation_context)
 
         elif choice == "3": # Download and Process
-            logging.info("Iniciando download e processamento de PDFs...")
+            logger.info("Starting download and processing", **operation_context)
             for competition in competitions:
-                download_pdfs(year, competition, pdf_path) # Pass Path object
-            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key) # Pass Path objects
+                download_pdfs(year, competition, pdf_path)
+            process_pdfs(pdf_path, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key)
             messagebox.showinfo("Sucesso", "Download e processamento dos PDFs concluídos.")
-            logging.info("Download e processamento de PDFs concluído.")
+            logger.info("Download and processing completed", **operation_context)
 
         elif choice == "4": # Normalize CSV
-            logging.info("Iniciando normalização de nomes no CSV...")
-            run_normalization(jogos_resumo_csv, lookup_path, jogos_resumo_clean_csv, gemini_api_key) # Pass Path objects
-            # No need for messagebox here, run_normalization handles it
+            logger.info("Starting CSV normalization", **operation_context)
+            run_normalization(jogos_resumo_csv, lookup_path, jogos_resumo_clean_csv, gemini_api_key)
 
         else:
+            error_message = f"Seleção inválida: {choice}"
+            logger.warning(error_message, **operation_context)
             messagebox.showwarning("Seleção Inválida", "Por favor, selecione uma operação válida.")
-            logging.warning("Seleção de operação inválida.")
-
+            
+    except CBFRobotError as e:
+        # Handle custom application exceptions
+        handle_error(
+            error=e,
+            log_context={"operation_details": operation_context},
+            ui_callback=messagebox.showerror
+        )
     except Exception as e:
-        logging.error(f"Erro durante a operação {choice}: {e}")
-        messagebox.showerror("Erro", f"Ocorreu um erro inesperado: {e}")
+        # Handle unexpected exceptions
+        handle_error(
+            error=e,
+            log_context={"operation_details": operation_context},
+            ui_callback=messagebox.showerror,
+            log_level="critical"
+        )
 
 def main():
     """
@@ -82,46 +115,69 @@ def main():
     """
     load_env_vars()
 
-    # Configurações - Get defaults, but year will be overridden by GUI
-    default_year = int(os.getenv("YEAR", datetime.date.today().year)) # Default to current year
-    competitions = os.getenv("COMPETITIONS", "142,424,242").split(",")
-    pdf_dir = os.getenv("PDF_DIR", "pdfs")
-    csv_dir = os.getenv("CSV_DIR", "csv")
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    try:
+        # Configurações - Get defaults, but year will be overridden by GUI
+        default_year = int(os.getenv("YEAR", datetime.date.today().year))
+        competitions = os.getenv("COMPETITIONS", "142,424,242").split(",")
+        pdf_dir = os.getenv("PDF_DIR", "pdfs")
+        csv_dir = os.getenv("CSV_DIR", "csv")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-    ensure_directory_exists(pdf_dir)
-    ensure_directory_exists(csv_dir)
+        if not gemini_api_key:
+            raise ConfigurationError("Chave da API Gemini não encontrada. Configure a variável GEMINI_API_KEY no arquivo .env.")
 
-    # Configuração da interface gráfica
-    root = tk.Tk()
-    root.title("CBF Robot")
+        ensure_directory_exists(pdf_dir)
+        ensure_directory_exists(csv_dir)
+        logger.info("Application started", 
+                   default_year=default_year, 
+                   competitions=competitions, 
+                   pdf_dir=pdf_dir, 
+                   csv_dir=csv_dir)
 
-    # --- Add Year Selection --- 
-    tk.Label(root, text="Ano para Download:").pack(pady=(10, 0))
-    year_var = tk.StringVar(value=str(default_year))
-    year_entry = tk.Entry(root, textvariable=year_var, width=10)
-    year_entry.pack(pady=(0, 10))
-    # --- End Year Selection ---
+        # Configuração da interface gráfica
+        root = tk.Tk()
+        root.title("CBF Robot")
 
-    tk.Label(root, text="Selecione a operação:").pack(pady=10)
+        # --- Add Year Selection --- 
+        tk.Label(root, text="Ano para Download:").pack(pady=(10, 0))
+        year_var = tk.StringVar(value=str(default_year))
+        year_entry = tk.Entry(root, textvariable=year_var, width=10)
+        year_entry.pack(pady=(0, 10))
 
-    # --- Update Button Commands to get year from entry --- 
-    tk.Button(root, text="1. Apenas download de novos borderôs", 
-              command=lambda: run_operation("1", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        tk.Label(root, text="Selecione a operação:").pack(pady=10)
 
-    tk.Button(root, text="2. Apenas análise de borderôs não processados", 
-              # Option 2 doesn't strictly need the year, but pass it for consistency
-              command=lambda: run_operation("2", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        # --- Update Button Commands to get year from entry --- 
+        tk.Button(root, text="1. Apenas download de novos borderôs", 
+                command=lambda: run_operation("1", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
 
-    tk.Button(root, text="3. Download e análise (execução completa)", 
-              command=lambda: run_operation("3", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+        tk.Button(root, text="2. Apenas análise de borderôs não processados", 
+                command=lambda: run_operation("2", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
 
-    # --- Add Normalization Button ---
-    tk.Button(root, text="4. Normalizar Nomes (CSV)",
-              command=lambda: run_operation("4", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
-    # --- End Button Command Updates ---
+        tk.Button(root, text="3. Download e análise (execução completa)", 
+                command=lambda: run_operation("3", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
 
-    root.mainloop()
+        # --- Add Normalization Button ---
+        tk.Button(root, text="4. Normalizar Nomes (CSV)",
+                command=lambda: run_operation("4", int(year_var.get()), competitions, pdf_dir, csv_dir, gemini_api_key)).pack(pady=5)
+
+        root.mainloop()
+        
+    except ConfigurationError as e:
+        # Handle configuration errors specially since UI might not be available yet
+        handle_error(
+            error=e,
+            log_level="critical",
+            ui_callback=lambda title, msg: messagebox.showerror(title, msg) if 'root' in locals() else print(f"{title}: {msg}")
+        )
+        sys.exit(1)
+    except Exception as e:
+        # Handle any other initialization errors
+        handle_error(
+            error=e,
+            log_level="critical",
+            ui_callback=lambda title, msg: messagebox.showerror(title, msg) if 'root' in locals() else print(f"{title}: {msg}")
+        )
+        sys.exit(1)
 
 def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detalhe_csv, gemini_api_key):
     """
@@ -135,34 +191,37 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
         gemini_api_key (str): Chave da API Google Gemini.
     """
     processed_ids = set()
+    operation_logger = get_logger("pdf_processing")
+    
     try:
         # Read existing summary data
         summary_data = read_csv(jogos_resumo_csv)
         for row in summary_data:
-            # Check if 'id_jogo_cbf' exists and is not empty or None
             jogo_id = row.get("id_jogo_cbf")
-            if jogo_id: # Ensures it's not None or empty string
-                processed_ids.add(str(jogo_id)) # Ensure it's stored/compared as a string
-        logging.info(f"Loaded {len(processed_ids)} processed game IDs from {jogos_resumo_csv}")
+            if jogo_id:
+                processed_ids.add(str(jogo_id))
+        operation_logger.info("Loaded processed IDs", count=len(processed_ids), csv_file=str(jogos_resumo_csv))
     except Exception as e:
-        # Log error but continue, assuming no IDs processed if file read fails
-        logging.error(f"Error reading processed IDs from {jogos_resumo_csv}: {e}. Proceeding cautiously.")
-        # Keep any IDs potentially loaded before the error
-        # processed_ids = set() # Avoid resetting if partially loaded
+        handle_error(
+            error=e, 
+            log_context={"csv_file": str(jogos_resumo_csv)},
+            log_level="warning"
+        )
 
     pdf_files = [f for f in os.listdir(pdf_dir) if f.endswith(".pdf")]
+    operation_logger.info("Found PDF files", count=len(pdf_files), directory=str(pdf_dir))
 
     for pdf_file in pdf_files:
         # Extract ID from filename (without extension)
-        id_jogo_cbf = str(os.path.splitext(pdf_file)[0]) # Use filename as the definitive ID
+        id_jogo_cbf = str(os.path.splitext(pdf_file)[0])
 
-        # Check 1: Using filename-based ID before reading/analyzing PDF
+        # Skip already processed PDFs
         if id_jogo_cbf in processed_ids:
-            logging.info(f"Skipping already processed PDF (filename match): {pdf_file} (ID: {id_jogo_cbf})")
+            operation_logger.info("Skipping processed PDF", filename=pdf_file, id=id_jogo_cbf)
             continue
 
         pdf_path = os.path.join(pdf_dir, pdf_file)
-        logging.info(f"Processing PDF: {pdf_path} (ID: {id_jogo_cbf})")
+        operation_logger.info("Processing PDF", filename=pdf_file, id=id_jogo_cbf, path=pdf_path)
 
         try:
             # Read PDF content as bytes
@@ -172,11 +231,16 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
             # Call the refactored analyze_pdf function
             response = analyze_pdf(pdf_content_bytes)
 
-            # Robust check for error in response
+            # Check for error in response
             if response.get("error"):
-                logging.error(f"Error analyzing {pdf_file} (ID: {id_jogo_cbf}): {response['error']}")
+                error_message = response.get("error")
+                operation_logger.error("Error analyzing PDF", 
+                                      error=error_message, 
+                                      filename=pdf_file, 
+                                      id=id_jogo_cbf)
+                
                 error_log_entry = {
-                    "id_jogo_cbf": id_jogo_cbf, # Use filename ID
+                    "id_jogo_cbf": id_jogo_cbf,
                     "data_jogo": None,
                     "time_mandante": None,
                     "time_visitante": None,
@@ -187,23 +251,22 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
                     "despesa_total": None,
                     "resultado_liquido": None,
                     "caminho_pdf_local": pdf_path,
-                    "data_processamento": datetime.date.today().isoformat(), # Use dynamic date
+                    "data_processamento": datetime.date.today().isoformat(),
                     "status": "Erro Analise",
-                    "log_erro": response['error']
+                    "log_erro": error_message
                 }
                 append_to_csv(jogos_resumo_csv, [error_log_entry], error_log_entry.keys())
-                # Add the ID to processed_ids even on error to prevent retries
                 processed_ids.add(id_jogo_cbf)
                 continue
 
-            # --- Safely extract data using .get() --- 
+            # Extract data safely
             match_details = response.get("match_details", {})
             financial_data = response.get("financial_data", {})
             audience_stats = response.get("audience_statistics", {})
             revenue_details = financial_data.get("revenue_details", [])
             expense_details = financial_data.get("expense_details", [])
 
-            # Prepare summary data - id_jogo_cbf is already defined from filename
+            # Prepare summary data
             resumo_jogo = {
                 "id_jogo_cbf": id_jogo_cbf,
                 "data_jogo": match_details.get("match_date"),
@@ -218,10 +281,11 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
                 "despesa_total": financial_data.get("total_expenses"),
                 "resultado_liquido": financial_data.get("net_result"),
                 "caminho_pdf_local": pdf_path,
-                "data_processamento": datetime.date.today().isoformat(), # Use dynamic date
+                "data_processamento": datetime.date.today().isoformat(),
                 "status": "Sucesso",
                 "log_erro": None
             }
+            
             # Define headers explicitly for consistency
             jogos_resumo_headers = [
                 "id_jogo_cbf", "data_jogo", "time_mandante", "time_visitante", "estadio", "competicao",
@@ -231,7 +295,7 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
             ]
             append_to_csv(jogos_resumo_csv, [resumo_jogo], jogos_resumo_headers)
 
-            # Add match ID (from filename) to detailed revenue/expense data
+            # Add match ID to detailed revenue/expense data
             for item in revenue_details:
                 item["id_jogo_cbf"] = id_jogo_cbf
             for item in expense_details:
@@ -239,27 +303,40 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
 
             # Append detailed data if present
             if revenue_details:
-                # Build headers: ID first, then other fields
                 receita_headers = ["id_jogo_cbf"] + [k for k in revenue_details[0].keys() if k != "id_jogo_cbf"]
                 append_to_csv(receitas_detalhe_csv, revenue_details, receita_headers)
 
             if expense_details:
-                # Build headers: ID first, then other fields
                 despesa_headers = ["id_jogo_cbf"] + [k for k in expense_details[0].keys() if k != "id_jogo_cbf"]
                 append_to_csv(despesas_detalhe_csv, expense_details, despesa_headers)
 
-            logging.info(f"Successfully processed and saved data for {id_jogo_cbf}")
-            # Add the ID used for saving to the set *after* successful save
+            operation_logger.info("Successfully processed PDF", 
+                                 id=id_jogo_cbf, 
+                                 match_date=match_details.get("match_date"),
+                                 teams=f"{match_details.get('home_team')} vs {match_details.get('away_team')}")
             processed_ids.add(id_jogo_cbf)
 
         except FileNotFoundError:
-            logging.error(f"PDF file not found: {pdf_path}")
+            handle_error(
+                error=FileNotFoundError(f"PDF file not found: {pdf_path}"),
+                log_context={"id": id_jogo_cbf, "filename": pdf_file},
+                log_level="error"
+            )
         except IOError as io_err:
-            logging.error(f"Error reading PDF file {pdf_path}: {io_err}")
+            handle_error(
+                error=io_err,
+                log_context={"id": id_jogo_cbf, "filename": pdf_file, "path": pdf_path},
+                log_level="error"
+            )
         except Exception as e:
-            # Catch any other unexpected error during processing of a single PDF
-            logging.exception(f"Unexpected error processing {pdf_file} (ID: {id_jogo_cbf}): {e}")
-            # Log error to CSV using filename ID
+            # Log unexpected error and record it in CSV
+            error_details = handle_error(
+                error=e,
+                log_context={"id": id_jogo_cbf, "filename": pdf_file, "path": pdf_path},
+                log_level="error"
+            )
+            
+            # Log error to CSV
             error_log_entry = {
                 "id_jogo_cbf": id_jogo_cbf,
                 "data_jogo": None, "time_mandante": None, "time_visitante": None, "estadio": None, "competicao": None,
@@ -270,7 +347,6 @@ def process_pdfs(pdf_dir, jogos_resumo_csv, receitas_detalhe_csv, despesas_detal
                 "log_erro": str(e)
             }
             append_to_csv(jogos_resumo_csv, [error_log_entry], error_log_entry.keys())
-            # Add the ID to processed_ids even on error to prevent retries
             processed_ids.add(id_jogo_cbf)
 
 if __name__ == "__main__":
