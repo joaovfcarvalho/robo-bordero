@@ -35,6 +35,10 @@ class ConfigurationError(CBFRobotError):
     """Exception raised for configuration errors."""
     pass
 
+class OperationCancelledError(CBFRobotError):
+    """Exception raised when an operation is cancelled by the user."""
+    pass
+
 # Structured logging processor for additional context
 def add_app_context(_, __, event_dict):
     """Add application context to log records."""
